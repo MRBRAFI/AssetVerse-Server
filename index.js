@@ -8,9 +8,11 @@ const port = process.env.PORT || 3000;
 //   "utf-8"
 // );
 // const serviceAccount = JSON.parse(decoded);
-// admin.initializeApp({
-//   credential: admin.credential.cert(serviceAccount),
-// });
+const serviceAccount = require("./assetverse-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 const app = express();
 // middleware
@@ -29,17 +31,26 @@ app.use(express.json());
 
 // jwt middlewares
 const verifyJWT = async (req, res, next) => {
-  const token = req?.headers?.authorization?.split(" ")[1];
-  console.log(token);
-  if (!token) return res.status(401).send({ message: "Unauthorized Access!" });
   try {
+    const authHeader = req.headers.authorization;
+
+    console.log("AUTH HEADER:", authHeader);
+
+    if (!authHeader) {
+      return res.status(401).send({ message: "Unauthorized Access" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
     const decoded = await admin.auth().verifyIdToken(token);
-    req.tokenEmail = decoded.email;
-    console.log(decoded);
+
+    req.email = decoded.email;
+    req.uid = decoded.uid;
+
     next();
-  } catch (err) {
-    console.log(err);
-    return res.status(401).send({ message: "Unauthorized Access!", err });
+  } catch (error) {
+    console.error("JWT Error:", error.message);
+    return res.status(401).send({ message: "Unauthorized Access" });
   }
 };
 
@@ -57,16 +68,18 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
+    await client.connect();
 
     const db = client.db("AssetVerse");
     const usersCollection = db.collection("users");
+    const packageCollection = db.collection("packages");
+    const assetsCollection = db.collection("assets");
 
     // users related APIs
 
     // HR registration
 
-    app.post("/users", async (req, res) => {
+    app.post("/users", verifyJWT, async (req, res) => {
       const userData = req.body;
 
       const existingUser = await usersCollection.findOne({
@@ -83,7 +96,7 @@ async function run() {
 
     // Employee Registration
 
-    app.post("/users", async (req, res) => {
+    app.post("/users", verifyJWT, async (req, res) => {
       const userData = req.body;
 
       const existingEmployee = await usersCollection.findOne({
@@ -98,10 +111,14 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users/:email", async (req, res) => {
+    // to get specific users
+
+    app.get("/users/:email", verifyJWT, async (req, res) => {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne({ email });
+
+        // console.log("consoled headers", req.headers);
 
         if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -110,6 +127,58 @@ async function run() {
         console.error(err);
         res.status(500).json({ message: "Server error", error: err });
       }
+    });
+
+    // to post packages
+
+    // app.post("/packages", async (req, res) => {
+    //   const packages = [
+    //     {
+    //       name: "Basic",
+    //       employeeLimit: 5,
+    //       price: 5,
+    //       features: ["Asset Tracking", "Employee Management", "Basic Support"],
+    //       isActive: true,
+    //       createdAt: new Date(),
+    //     },
+    //     {
+    //       name: "Standard",
+    //       employeeLimit: 10,
+    //       price: 8,
+    //       features: [
+    //         "All Basic features",
+    //         "Advanced Analytics",
+    //         "Priority Support",
+    //       ],
+    //       isActive: true,
+    //       createdAt: new Date(),
+    //     },
+    //     {
+    //       name: "Premium",
+    //       employeeLimit: 20,
+    //       price: 15,
+    //       features: [
+    //         "All Standard features",
+    //         "Custom Branding",
+    //         "24/7 Support",
+    //       ],
+    //       isActive: true,
+    //       createdAt: new Date(),
+    //     },
+    //   ];
+
+    //   const result = await packageCollection.insertMany(packages);
+    //   res.send(result);
+    // });
+
+    // to get packages
+
+    app.get("/packages", async (req, res) => {
+      const packages = await packageCollection
+        .find({ isActive: true })
+        .toArray();
+
+      res.send(packages);
     });
 
     // Send a ping to confirm a successful connection
