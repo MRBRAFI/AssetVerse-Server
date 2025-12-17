@@ -75,7 +75,14 @@ async function run() {
     const packageCollection = db.collection("packages");
     const assetsCollection = db.collection("assets");
 
-    // users related APIs
+    // Asset related APIs
+
+    // to get Asset data
+
+    app.get("/assets", verifyJWT, async (req, res) => {
+      const result = await assetsCollection.find().toArray();
+      res.send(result);
+    });
 
     // Post asset data
 
@@ -85,6 +92,7 @@ async function run() {
       const result = await assetsCollection.insertOne(assetData);
       res.send(result);
     });
+    // users related APIs
 
     // HR registration
 
