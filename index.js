@@ -77,9 +77,18 @@ async function run() {
 
     // users related APIs
 
+    // Post asset data
+
+    app.post("/assets", verifyJWT, async (req, res) => {
+      const assetData = req.body;
+      console.log(assetData);
+      const result = await assetsCollection.insertOne(assetData);
+      res.send(result);
+    });
+
     // HR registration
 
-    app.post("/users", verifyJWT, async (req, res) => {
+    app.post("/users", async (req, res) => {
       const userData = req.body;
 
       const existingUser = await usersCollection.findOne({
