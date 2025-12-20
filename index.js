@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
 const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
@@ -34,7 +34,7 @@ const verifyJWT = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
-    console.log("AUTH HEADER:", authHeader);
+    // console.log("AUTH HEADER:", authHeader);
 
     if (!authHeader) {
       return res.status(401).send({ message: "Unauthorized Access" });
@@ -46,6 +46,8 @@ const verifyJWT = async (req, res, next) => {
 
     req.email = decoded.email;
     req.uid = decoded.uid;
+    req.name = decoded.name;
+    req.picture = decoded.picture;
 
     next();
   } catch (error) {
@@ -74,13 +76,79 @@ async function run() {
     const usersCollection = db.collection("users");
     const packageCollection = db.collection("packages");
     const assetsCollection = db.collection("assets");
+    const requestsCollection = db.collection("requests");
+
+    // Request related api
+
+    app.post("/requests", verifyJWT, async (req, res) => {
+      try {
+        const { assetId, assetName, assetType, hrEmail, companyName, note } =
+          req.body;
+
+        const requestDoc = {
+          assetId,
+          assetName,
+          assetType,
+          requesterName: req.name,
+          requesterEmail: req.email,
+          requesterPhoto: req.picture,
+          hrEmail,
+          companyName,
+          requestDate: new Date(),
+          requestStatus: "pending",
+          approvalDate: null,
+          note: note || "",
+          processedBy: null,
+        };
+
+        const result = await requestsCollection.insertOne(requestDoc);
+        res
+          .status(201)
+          .send({ message: "Request submitted", requestId: result.insertedId });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    app.get("/requests/hr", verifyJWT, async (req, res) => {
+      const hrEmail = req.email;
+
+      const result = await requestsCollection
+        .find({
+          hrEmail,
+        })
+        .toArray();
+
+      res.send(result);
+    });
 
     // Asset related APIs
 
     // to get Asset data
 
-    app.get("/assets", verifyJWT, async (req, res) => {
-      const result = await assetsCollection.find().toArray();
+    app.get("/assets", async (req, res) => {
+      // console.log(req.query);
+      const { limit = 0, skip = 0 } = req.query;
+      const limitNum = Number(limit);
+      const skipNum = Number(skip);
+
+      const result = await assetsCollection
+        .find()
+        .limit(limitNum)
+        .skip(skipNum)
+        .toArray();
+
+      const count = await assetsCollection.countDocuments();
+
+      res.send({ result, total: count });
+    });
+
+    // to get single Asset data
+
+    app.get("/assets/:id", verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      const result = await assetsCollection.findOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
@@ -96,7 +164,7 @@ async function run() {
 
     // HR registration
 
-    app.post("/users", async (req, res) => {
+    app.post("/users/hr", async (req, res) => {
       const userData = req.body;
 
       const existingUser = await usersCollection.findOne({
@@ -113,7 +181,7 @@ async function run() {
 
     // Employee Registration
 
-    app.post("/users", verifyJWT, async (req, res) => {
+    app.post("/users/employee", verifyJWT, async (req, res) => {
       const userData = req.body;
 
       const existingEmployee = await usersCollection.findOne({
@@ -130,7 +198,7 @@ async function run() {
 
     // to get specific users
 
-    app.get("/users/:email", verifyJWT, async (req, res) => {
+    app.get("/users/:email", async (req, res) => {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne({ email });
