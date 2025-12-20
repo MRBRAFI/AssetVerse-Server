@@ -77,6 +77,34 @@ async function run() {
     const packageCollection = db.collection("packages");
     const assetsCollection = db.collection("assets");
     const requestsCollection = db.collection("requests");
+    const employeeAffiliationsCollection = db.collection("affiliation");
+    const assignedAssetsCollections = db.collection("assignedAssets");
+
+    // Approval and Assignment related APIs
+
+    app.patch("/requests/:id/action", verifyJWT, async (req, res) => {
+      try {
+        const requestId = req.params.id;
+        const { action } = req.body;
+
+        if (!["approve", "reject"].includes(action)) {
+          return res.status(400).json({ message: "Invalid action" });
+        }
+
+        const request = await requestsCollection.findOne({
+          _id: new ObjectId(requestId),
+        });
+        if (!request) {
+          return res.status(404).json({ message: "Request not found" });
+        }
+
+        if (request.hrEmail !== req.email) {
+          return res
+            .status(403)
+            .json({ message: "Unauthorized to process this request" });
+        }
+      } catch {}
+    });
 
     // Request related api
 
