@@ -87,6 +87,8 @@ async function run() {
         const requestId = req.params.id;
         const { action } = req.body;
 
+        /* ---------------- VALIDATION ---------------- */
+
         if (!["approve", "reject"].includes(action)) {
           return res.status(400).json({ message: "Invalid action" });
         }
@@ -94,16 +96,141 @@ async function run() {
         const request = await requestsCollection.findOne({
           _id: new ObjectId(requestId),
         });
+
         if (!request) {
           return res.status(404).json({ message: "Request not found" });
         }
 
+        // Only owning HR can process
         if (request.hrEmail !== req.email) {
           return res
             .status(403)
             .json({ message: "Unauthorized to process this request" });
         }
-      } catch {}
+
+        /* ---------------- REJECT FLOW ---------------- */
+
+        if (action === "reject") {
+          await requestsCollection.updateOne(
+            { _id: new ObjectId(requestId) },
+            {
+              $set: {
+                requestStatus: "rejected",
+                processedBy: req.email,
+                approvalDate: new Date(),
+              },
+            }
+          );
+
+          return res.json({ message: "Request rejected successfully" });
+        }
+
+        /* ---------------- APPROVE FLOW ---------------- */
+
+        const hr = await usersCollection.findOne({ email: req.email });
+
+        if (!hr) {
+          return res.status(404).json({ message: "HR not found" });
+        }
+
+        /* -------- EMPLOYEE AFFILIATION CHECK -------- */
+
+        const existingAffiliation =
+          await employeeAffiliationsCollection.findOne({
+            employeeEmail: request.requesterEmail,
+            hrEmail: hr.email,
+          });
+
+        // Only count employee once
+        if (!existingAffiliation) {
+          const newEmployeeCount = hr.currentEmployees + 1;
+
+          if (newEmployeeCount > hr.packageLimit) {
+            return res.status(400).json({
+              message: "HR exceeded package limit. Please upgrade package.",
+            });
+          }
+
+          // Create affiliation
+          await employeeAffiliationsCollection.insertOne({
+            employeeEmail: request.requesterEmail,
+            employeeName: request.requesterName,
+            hrEmail: hr.email,
+            companyName: hr.companyName,
+            companyLogo: hr.companyLogo,
+            affiliationDate: new Date(),
+            status: "active",
+          });
+
+          // Increment employee count
+          await usersCollection.updateOne(
+            { email: hr.email },
+            { $inc: { currentEmployees: 1 } }
+          );
+        }
+
+        /* ---------------- ASSET CHECK & DEDUCTION ---------------- */
+
+        const asset = await assetsCollection.findOne({
+          _id: new ObjectId(request.assetId),
+        });
+
+        if (!asset) {
+          return res.status(404).json({ message: "Asset not found" });
+        }
+
+        if (asset.quantity <= 0) {
+          return res.status(400).json({
+            message: "Asset is no longer available",
+          });
+        }
+
+        // Deduct asset quantity
+        await assetsCollection.updateOne(
+          { _id: asset._id },
+          { $inc: { quantity: -1 } }
+        );
+
+        /* ---------------- REQUEST STATUS UPDATE ---------------- */
+
+        await requestsCollection.updateOne(
+          { _id: new ObjectId(requestId) },
+          {
+            $set: {
+              requestStatus: "approved",
+              approvalDate: new Date(),
+              processedBy: req.email,
+            },
+          }
+        );
+
+        /* ---------------- ASSIGNED ASSET INSERT (FIXED) ---------------- */
+
+        // ✅ CORRECT collection name (THIS WAS THE BUG)
+        await assignedAssetsCollections.insertOne({
+          assetId: asset._id,
+          assetName: asset.name,
+          assetImage: asset.image,
+          assetType: asset.type,
+          employeeEmail: request.requesterEmail,
+          employeeName: request.requesterName,
+          hrEmail: hr.email,
+          companyName: hr.companyName,
+          assignmentDate: new Date(),
+          returnDate: null,
+          status: "assigned",
+        });
+
+        /* ---------------- FINAL RESPONSE ---------------- */
+
+        return res.json({ message: "Request approved successfully" });
+      } catch (error) {
+        console.error("Approve request error:", error);
+        return res.status(500).json({
+          message: "Server error",
+          error: error.message,
+        });
+      }
     });
 
     // Request related api
