@@ -80,6 +80,115 @@ async function run() {
     const employeeAffiliationsCollection = db.collection("affiliation");
     const assignedAssetsCollections = db.collection("assignedAssets");
 
+    // Analytics APIs
+
+    // 1. Get asset type distribution (Returnable vs Non-returnable)
+    app.get("/analytics/asset-distribution", verifyJWT, async (req, res) => {
+      try {
+        const hrEmail = req.email;
+
+        const returnable = await assignedAssetsCollections.countDocuments({
+          hrEmail,
+          assetType: "Returnable",
+          status: "assigned",
+        });
+
+        const nonReturnable = await assignedAssetsCollections.countDocuments({
+          hrEmail,
+          assetType: "Non-returnable",
+          status: "assigned",
+        });
+
+        res.json({
+          returnable,
+          nonReturnable,
+        });
+      } catch (error) {
+        console.error("Asset distribution error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    // 2. Get top 5 most requested assets
+    app.get("/analytics/top-requested-assets", verifyJWT, async (req, res) => {
+      try {
+        const hrEmail = req.email;
+
+        const topAssets = await requestsCollection
+          .aggregate([
+            { $match: { hrEmail } },
+            {
+              $group: {
+                _id: "$assetName",
+                assetId: { $first: "$assetId" },
+                assetType: { $first: "$assetType" },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { count: -1 } },
+            { $limit: 5 },
+            {
+              $project: {
+                assetName: "$_id",
+                assetType: "$assetType",
+                requestCount: "$count",
+                _id: 0,
+              },
+            },
+          ])
+          .toArray();
+
+        res.json(topAssets);
+      } catch (error) {
+        console.error("Top requested assets error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    // 3. Get overview statistics
+    app.get("/analytics/overview", verifyJWT, async (req, res) => {
+      try {
+        const hrEmail = req.email;
+
+        const [
+          totalEmployees,
+          totalAssets,
+          totalAssigned,
+          pendingRequests,
+          approvedRequests,
+        ] = await Promise.all([
+          employeeAffiliationsCollection.countDocuments({
+            hrEmail,
+            status: "active",
+          }),
+          assetsCollection.countDocuments({ "HR.email": hrEmail }),
+          assignedAssetsCollections.countDocuments({
+            hrEmail,
+            status: "assigned",
+          }),
+          requestsCollection.countDocuments({
+            hrEmail,
+            requestStatus: "pending",
+          }),
+          requestsCollection.countDocuments({
+            hrEmail,
+            requestStatus: "approved",
+          }),
+        ]);
+
+        res.json({
+          totalEmployees,
+          totalAssets,
+          totalAssigned,
+          pendingRequests,
+          approvedRequests,
+        });
+      } catch (error) {
+        console.error("Overview statistics error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
     // Approval and Assignment related APIs
 
     app.patch("/requests/:id/action", verifyJWT, async (req, res) => {
