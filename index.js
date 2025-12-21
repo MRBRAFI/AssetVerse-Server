@@ -3,6 +3,7 @@ const express = require("express");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
 const admin = require("firebase-admin");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const port = process.env.PORT || 3000;
 // const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
 //   "utf-8"
@@ -81,6 +82,136 @@ async function run() {
     const assignedAssetsCollections = db.collection("assignedAssets");
 
     // Analytics APIs
+
+    // Implementing stripe payment gateways
+
+    app.post("/create-payment-intent", verifyJWT, async (req, res) => {
+      try {
+        const { price } = req.body;
+        const amount = parseInt(price * 100);
+
+        // Create a PaymentIntent with the order amount and currency
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+
+        res.send({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.error("Payment intent error:", error);
+        res.status(500).json({ message: "Payment intent creation failed" });
+      }
+    });
+
+    // 2. Process Package Upgrade
+    app.post("/upgrade-package", verifyJWT, async (req, res) => {
+      try {
+        const {
+          packageName,
+          employeeLimit,
+          price,
+          transactionId,
+          paymentStatus,
+        } = req.body;
+        const hrEmail = req.email;
+
+        // Get HR user
+        const hr = await usersCollection.findOne({ email: hrEmail });
+
+        if (!hr) {
+          return res.status(404).json({ message: "HR not found" });
+        }
+
+        if (hr.role !== "hr") {
+          return res
+            .status(403)
+            .json({ message: "Only HR can upgrade packages" });
+        }
+
+        // Save payment record
+        const paymentRecord = {
+          hrEmail,
+          companyName: hr.companyName,
+          packageName,
+          employeeLimit,
+          amount: price,
+          transactionId,
+          paymentDate: new Date(),
+          status: paymentStatus || "completed",
+        };
+
+        await db.collection("payments").insertOne(paymentRecord);
+
+        // Update HR user's package information
+        await usersCollection.updateOne(
+          { email: hrEmail },
+          {
+            $set: {
+              subscription: packageName.toLowerCase(),
+              packageLimit: employeeLimit,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        res.json({
+          message: "Package upgraded successfully",
+          payment: paymentRecord,
+        });
+      } catch (error) {
+        console.error("Upgrade package error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    // 3. Get HR Payment History
+    app.get("/payment-history/:email", verifyJWT, async (req, res) => {
+      try {
+        const hrEmail = req.params.email;
+
+        const payments = await db
+          .collection("payments")
+          .find({ hrEmail })
+          .sort({ paymentDate: -1 })
+          .toArray();
+
+        res.json(payments);
+      } catch (error) {
+        console.error("Payment history error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    // 4. Get Current HR Package Info
+    app.get("/current-package", verifyJWT, async (req, res) => {
+      try {
+        const hrEmail = req.email;
+
+        const hr = await usersCollection.findOne(
+          { email: hrEmail },
+          {
+            projection: {
+              packageLimit: 1,
+              currentEmployees: 1,
+              subscription: 1,
+              companyName: 1,
+            },
+          }
+        );
+
+        if (!hr) {
+          return res.status(404).json({ message: "HR not found" });
+        }
+
+        res.json(hr);
+      } catch (error) {
+        console.error("Current package error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
 
     // 1. Get asset type distribution (Returnable vs Non-returnable)
     app.get("/analytics/asset-distribution", verifyJWT, async (req, res) => {
