@@ -322,6 +322,83 @@ async function run() {
       }
     });
 
+    // To get the specific team member
+
+    // Get team members for employee (based on their affiliations)
+    app.get("/my-team", verifyJWT, async (req, res) => {
+      try {
+        const employeeEmail = req.email;
+
+        const affiliations = await employeeAffiliationsCollection
+          .find({
+            employeeEmail,
+            status: "active",
+          })
+          .toArray();
+
+        if (affiliations.length === 0) {
+          return res.json({ companies: [] });
+        }
+
+        const companies = await Promise.all(
+          affiliations.map(async (aff) => {
+            const teamAffiliations = await employeeAffiliationsCollection
+              .find({
+                hrEmail: aff.hrEmail,
+                status: "active",
+              })
+              .toArray();
+
+            const teamMembers = await Promise.all(
+              teamAffiliations.map(async (teamAff) => {
+                const user = await usersCollection.findOne({
+                  email: teamAff.employeeEmail,
+                });
+
+                return {
+                  _id: user?._id,
+                  name: user?.name || teamAff.employeeName,
+                  email: user?.email || teamAff.employeeEmail,
+                  photo:
+                    user?.photo || user?.image || teamAff.employeePhoto || "",
+                  position: user?.position || user?.role || "Employee",
+                  dateOfBirth: user?.dateOfBirth || null,
+                  joinDate: teamAff.affiliationDate,
+                };
+              })
+            );
+
+            const currentMonth = new Date().getMonth();
+            const upcomingBirthdays = teamMembers
+              .filter((member) => {
+                if (!member.dateOfBirth) return false;
+                const birthMonth = new Date(member.dateOfBirth).getMonth();
+                return birthMonth === currentMonth;
+              })
+              .sort((a, b) => {
+                const dayA = new Date(a.dateOfBirth).getDate();
+                const dayB = new Date(b.dateOfBirth).getDate();
+                return dayA - dayB;
+              });
+
+            return {
+              companyName: aff.companyName,
+              companyLogo: aff.companyLogo || "",
+              hrEmail: aff.hrEmail,
+              teamMembers,
+              upcomingBirthdays,
+              totalMembers: teamMembers.length,
+            };
+          })
+        );
+
+        res.json({ companies });
+      } catch (error) {
+        console.error("Fetch team error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
     // to get the specific employee
 
     // GET employees for HR
