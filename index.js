@@ -155,6 +155,7 @@ async function run() {
           await employeeAffiliationsCollection.insertOne({
             employeeEmail: request.requesterEmail,
             employeeName: request.requesterName,
+            employeePhoto: request.requesterPhoto,
             hrEmail: hr.email,
             companyName: hr.companyName,
             companyLogo: hr.companyLogo,
@@ -214,6 +215,7 @@ async function run() {
           assetType: asset.type,
           employeeEmail: request.requesterEmail,
           employeeName: request.requesterName,
+          employeeImage: request.requesterPhoto,
           hrEmail: hr.email,
           companyName: hr.companyName,
           assignmentDate: new Date(),
@@ -289,6 +291,37 @@ async function run() {
       }
     });
 
+    // Get the assigned assets EMPlOYEE SPECIFIC
+
+    // GET assigned assets for a specific employee (HR only)
+    app.get("/assigned-assets/employee/:email", verifyJWT, async (req, res) => {
+      try {
+        const employeeEmail = req.params.email;
+        const loggedInEmail = req.email; // The logged-in user's email from JWT
+
+        // Check if the logged-in user is requesting their own assets
+        if (employeeEmail !== loggedInEmail) {
+          return res.status(403).json({
+            message: "You can only view your own assigned assets",
+          });
+        }
+
+        // Find assets assigned to this employee
+        const assets = await assignedAssetsCollections
+          .find({
+            employeeEmail,
+            status: "assigned",
+          })
+          .sort({ assignmentDate: -1 })
+          .toArray();
+
+        res.json(assets);
+      } catch (error) {
+        console.error("Fetch assigned assets error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
     // to get the specific employee
 
     // GET employees for HR
@@ -296,22 +329,35 @@ async function run() {
       try {
         const hrEmail = req.email;
 
-        // Fetch all active affiliations of this HR
+        // 1. Get active affiliations
         const affiliations = await employeeAffiliationsCollection
           .find({ hrEmail, status: "active" })
           .toArray();
 
-        // Get employee details for each affiliation
+        // 2. Build employee display data
         const employees = await Promise.all(
           affiliations.map(async (aff) => {
+            // get user info
             const user = await usersCollection.findOne({
               email: aff.employeeEmail,
             });
+
+            // count assigned assets
+            const assetsCount = await assignedAssetsCollections.countDocuments({
+              employeeEmail: aff.employeeEmail,
+              hrEmail,
+              status: "assigned",
+            });
+
             return {
-              _id: user._id,
-              email: user.email,
-              role: user.role,
+              _id: user?._id,
+              name: user?.name || "Unknown",
+              photo: user?.photo || user?.image || "",
+              email: user?.email,
+              role: user?.role,
               status: aff.status,
+              joinDate: aff.affiliationDate,
+              assetsCount,
             };
           })
         );
@@ -322,8 +368,6 @@ async function run() {
         res.status(500).json({ message: "Server error" });
       }
     });
-
-    // Request related api
 
     app.post("/requests", verifyJWT, async (req, res) => {
       try {
@@ -426,7 +470,7 @@ async function run() {
 
     // Employee Registration
 
-    app.post("/users/employee", verifyJWT, async (req, res) => {
+    app.post("/users/employee", async (req, res) => {
       const userData = req.body;
 
       const existingEmployee = await usersCollection.findOne({
