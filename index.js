@@ -251,7 +251,42 @@ async function run() {
             message: "Employee is not affiliated with your company",
           });
         }
-      } catch (error) {}
+
+        const asset = await assetsCollection.findOne({
+          _id: new ObjectId(assetId),
+          hrEmail,
+          quantity: { $gt: 0 },
+        });
+
+        if (!asset) {
+          return res.status(400).json({
+            message: "Asset unavailable or not owned by you",
+          });
+        }
+
+        await assetsCollection.updateOne(
+          { _id: asset._id },
+          { $inc: { quantity: -1 } }
+        );
+
+        await assignedAssetsCollections.insertOne({
+          assetId: asset._id,
+          assetName: asset.name,
+          assetType: asset.type,
+          assetImage: asset.image,
+          employeeEmail,
+          hrEmail,
+          companyName: asset.companyName,
+          assignmentDate: new Date(),
+          returnDate: null,
+          status: "assigned",
+        });
+
+        res.json({ message: "Asset assigned successfully" });
+      } catch (error) {
+        console.error("Assign asset error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
     });
 
     // Request related api
