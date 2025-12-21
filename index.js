@@ -233,6 +233,27 @@ async function run() {
       }
     });
 
+    // Assign Assets to the existing affiliated employee
+
+    app.post("/assign-asset", verifyJWT, async (req, res) => {
+      try {
+        const { employeeEmail, assetId } = req.body;
+        const hrEmail = req.email;
+
+        const affiliation = await employeeAffiliationsCollection.findOne({
+          employeeEmail,
+          hrEmail,
+          status: "active",
+        });
+
+        if (!affiliation) {
+          return res.status(403).json({
+            message: "Employee is not affiliated with your company",
+          });
+        }
+      } catch (error) {}
+    });
+
     // Request related api
 
     app.post("/requests", verifyJWT, async (req, res) => {
