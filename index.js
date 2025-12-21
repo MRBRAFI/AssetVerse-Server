@@ -254,7 +254,7 @@ async function run() {
 
         const asset = await assetsCollection.findOne({
           _id: new ObjectId(assetId),
-          hrEmail,
+          "HR.email": hrEmail,
           quantity: { $gt: 0 },
         });
 
@@ -276,7 +276,7 @@ async function run() {
           assetImage: asset.image,
           employeeEmail,
           hrEmail,
-          companyName: asset.companyName,
+          companyName: asset.HR.companyName,
           assignmentDate: new Date(),
           returnDate: null,
           status: "assigned",
@@ -285,6 +285,40 @@ async function run() {
         res.json({ message: "Asset assigned successfully" });
       } catch (error) {
         console.error("Assign asset error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    // to get the specific employee
+
+    // GET employees for HR
+    app.get("/employees/hr", verifyJWT, async (req, res) => {
+      try {
+        const hrEmail = req.email;
+
+        // Fetch all active affiliations of this HR
+        const affiliations = await employeeAffiliationsCollection
+          .find({ hrEmail, status: "active" })
+          .toArray();
+
+        // Get employee details for each affiliation
+        const employees = await Promise.all(
+          affiliations.map(async (aff) => {
+            const user = await usersCollection.findOne({
+              email: aff.employeeEmail,
+            });
+            return {
+              _id: user._id,
+              email: user.email,
+              role: user.role,
+              status: aff.status,
+            };
+          })
+        );
+
+        res.json(employees);
+      } catch (error) {
+        console.error("Fetch employees error:", error);
         res.status(500).json({ message: "Server error" });
       }
     });
