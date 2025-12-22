@@ -23,7 +23,6 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "https://asset-verse-client-nine.vercel.app",
-      "https://b12-m11-session.web.app",
     ],
     credentials: true,
     optionSuccessStatus: 200,
