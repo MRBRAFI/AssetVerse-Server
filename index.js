@@ -22,6 +22,7 @@ app.use(
     origin: [
       "http://localhost:5173",
       "http://localhost:5174",
+      "https://asset-verse-client-nine.vercel.app",
       "https://b12-m11-session.web.app",
     ],
     credentials: true,
@@ -118,14 +119,21 @@ async function run() {
         } = req.body;
         const hrEmail = req.email;
 
-        // Get HR user
+        console.log("HR Email from JWT:", hrEmail);
+
+        // Get HR user - MUST check by email from JWT, not from body
         const hr = await usersCollection.findOne({ email: hrEmail });
 
+        console.log(hr);
+
         if (!hr) {
+          console.log("HR not found for email:", hrEmail);
           return res.status(404).json({ message: "HR not found" });
         }
 
-        if (hr.role !== "hr") {
+        console.log("HR found:", hr.name, "| Role:", hr.role);
+
+        if (hr.role !== "HR") {
           return res
             .status(403)
             .json({ message: "Only HR can upgrade packages" });
@@ -145,7 +153,6 @@ async function run() {
 
         await db.collection("payments").insertOne(paymentRecord);
 
-        // Update HR user's package information
         await usersCollection.updateOne(
           { email: hrEmail },
           {
@@ -157,13 +164,15 @@ async function run() {
           }
         );
 
+        console.log("Package upgraded successfully for:", hrEmail);
+
         res.json({
           message: "Package upgraded successfully",
           payment: paymentRecord,
         });
       } catch (error) {
-        console.error("Upgrade package error:", error);
-        res.status(500).json({ message: "Server error" });
+        console.error("pgrade package error:", error);
+        res.status(500).json({ message: "Server error", error: error.message });
       }
     });
 
@@ -185,7 +194,33 @@ async function run() {
       }
     });
 
-    // 4. Get Current HR Package Info
+    // 4. Get All Payments for HR
+    app.get("/payments", verifyJWT, async (req, res) => {
+      try {
+        const hrEmail = req.email;
+
+        const payments = await db
+          .collection("payments")
+          .find({ hrEmail })
+          .sort({ paymentDate: -1 })
+          .toArray();
+
+        res.json({
+          success: true,
+          count: payments.length,
+          payments,
+        });
+      } catch (error) {
+        console.error("Get payments error:", error);
+        res.status(500).json({
+          success: false,
+          message: "Server error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. Get Current HR Package Info
     app.get("/current-package", verifyJWT, async (req, res) => {
       try {
         const hrEmail = req.email;
